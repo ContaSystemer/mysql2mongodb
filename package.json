@@ -1,0 +1,15 @@
+{
+  "name": "datalogger",
+  "version": "1.0.0",
+  "description": "Tool for migrate data from MySQL to MongoDB",
+  "main": "index.js",
+  "author": "Henri Cavalcante",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "dayjs": "^1.11.7",
+    "dotenv": "^16.0.3",
+    "mongodb": "^4.12.1",
+    "mysql2": "^2.3.3",
+    "yargs": "^17.6.2"
+  }
+}
