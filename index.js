@@ -2,7 +2,7 @@ const fs = require('fs');
 const yargs = require('yargs');
 const dayjs = require('dayjs');
 const {MongoClient} = require('mongodb');
-const mysql = require('mysql2/promise');
+const mysql = require('mysql2');
 require('dotenv').config();
 
 const defaultFrom = dayjs().add(-1, 'day').format('YYYY-MM-DD 00:00:00');
@@ -25,6 +25,11 @@ const argv = yargs
         type: 'string',
         default: 'tables.json'
     })
+    .option('fulltable', {
+        description: 'When this parameter is used, it won\'t filter by date and it will only transfer one of the tables',
+        type: 'string',
+        default: ''
+    })
     .help()
     .alias('help', 'h').argv;
 
@@ -41,6 +46,9 @@ const SQL_DBNAME = process.env.SQL_DBNAME || 'jotunheim';
 
 const timeOptions = {hour12: false};
 
+let noSqlDb;
+let sqlConnection;
+
 async function main() {
 
     const noSqlUrlParts = [NOSQL_URL];
@@ -54,9 +62,9 @@ async function main() {
     const noSqlClient = new MongoClient(noSqlUrl, noSqlConnectionOptions);
 
     await noSqlClient.connect();
-    const noSqlDb = noSqlClient.db(NOSQL_DBNAME);
+    noSqlDb = noSqlClient.db(NOSQL_DBNAME);
 
-    const sqlConnection = await mysql.createConnection(
+    sqlConnection = await mysql.createConnection(
         {
             host: SQL_HOST,
             port: SQL_PORT,
@@ -73,14 +81,17 @@ async function main() {
 
     for (const table of tables) {
 
-        await processTable(sqlConnection, noSqlDb, table);
+        if (argv.fulltable === '' || argv.fulltable === table.name) {
+
+            await processTable(table);
+        }
     }
 
-    noSqlClient.close();
     sqlConnection.end();
+    noSqlClient.close();
 }
 
-async function processTable(sqlConnection, noSqlDb, table) {
+async function processTable(table) {
 
     const now = new Date();
     console.debug(
@@ -90,19 +101,75 @@ async function processTable(sqlConnection, noSqlDb, table) {
 
     const columns = table.columns.join(',');
 
-    const sql = `
+    let sql = `
         SELECT t.${table.primaryKeyColumn}, t.${columns}
         FROM ${table.name} t
+    `;
+
+    if (!argv.fulltable) {
+
+        sql += `  
         WHERE t.${table.insertDateColumn} BETWEEN '${argv.from}' AND '${argv.to}'
-            OR t.${table.updateDateColumn} BETWEEN '${argv.from}' AND '${argv.to}';
-    `
-    const [rows] = await sqlConnection.execute(sql);
-
-    for (const row of rows) {
-
-        const noSqlCollection = noSqlDb.collection(table.name);
-        await noSqlCollection.replaceOne({'_id': row.id}, row, {upsert: true});
+           OR t.${table.updateDateColumn} BETWEEN '${argv.from}' AND '${argv.to}'
+       `;
     }
+
+    const query = sqlConnection.query(sql);
+    const noSqlCollection = noSqlDb.collection(table.name);
+
+    let totalRows = 0;
+    let processedRows = 0;
+    const maxParalellProcessing = 10000;
+    const minParalellProcessing = 5000;
+    await new Promise((resolve, reject) => {
+        query
+            .on('result', (row) => {
+
+                totalRows++;
+                printProcessesRows(processedRows, totalRows)
+
+                if ((totalRows - processedRows) > maxParalellProcessing) {
+
+                    sqlConnection.pause();
+                }
+
+                noSqlCollection
+                    .replaceOne({'_id': row.id}, row, {upsert: true})
+                    .then(() => {
+
+                        processedRows++;
+                        printProcessesRows(processedRows, totalRows);
+                        if ((totalRows - processedRows) < minParalellProcessing) {
+
+                            sqlConnection.resume();
+                        }
+                    });
+            })
+            .on('error', function (err) {
+
+                console.error(err);
+                reject();
+            })
+            .on('end', async () => {
+
+                const interval = setInterval(() => {
+
+                    if (totalRows === processedRows) {
+
+                        clearInterval(interval);
+                        console.debug(' Done.');
+                        resolve();
+                    }
+                }, 100);
+            });
+    });
+}
+
+function printProcessesRows(processingRows, totalRows) {
+
+    process.stdout.cursorTo(0);
+    process.stdout.write(`    Processing ${processingRows}/${totalRows} rows    `);
+
 }
 
 main();
