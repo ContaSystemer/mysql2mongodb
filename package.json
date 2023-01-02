@@ -11,5 +11,8 @@
     "mongodb": "^4.12.1",
     "mysql2": "^2.3.3",
     "yargs": "^17.6.2"
+  },
+  "bin" : {
+    "execute" : "mysql2mongodb.js"
   }
 }
