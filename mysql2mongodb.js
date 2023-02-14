@@ -16,7 +16,7 @@ const SQL_USER = process.env.SQL_USER || 'root';
 const SQL_PASSWORD = process.env.SQL_PASSWORD || 'root';
 const SQL_DBNAME = process.env.SQL_DBNAME || 'jotunheim';
 
-const timeOptions = {hour12: false};
+const timeOptions = { hour12: false };
 
 let noSqlDb;
 let noSqlClient;
